@@ -1,0 +1,1033 @@
+---
+title: "Appendix - EDA and Modeling (R Code)"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE,
+                      message = FALSE,
+                      eval = FALSE)
+```
+
+# Exploratory Data Analysis
+
+Data sourced from: https://www.kaggle.com/andrewmvd/fetal-health-classification 
+
+```{r , eval=FALSE}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(ggcorrplot)
+library(expss)
+library(here)
+library(epiDisplay)
+library(dplyr)
+library(ggplot2)
+library(nnet)
+library(caret)
+library(e1071)
+library(splitTools)
+library(randomForest)
+```
+
+```{r import, eval=FALSE}
+heart <- read_csv("../data/fetal_health.csv")
+names(heart)[1] = "baseline_value"
+```
+
+### EDA (Continous Variables)
+
+```{r, eval=FALSE}
+cols_discrete <- c("severe_decelerations","prolongued_decelerations",
+                  "histogram_number_of_zeroes",
+                  "histogram_tendency", "fetal_health")
+cols_continuous <- names(heart %>% select(-cols_discrete))
+
+corr <- round(heart %>% select(cols_continuous) %>% cor(),1)
+ggcorrplot(corr, hc.order=TRUE, 
+           ggtheme=theme_classic,
+           colors = c("#6D9EC1", "white", "#E46726"),
+           lab=TRUE,
+           lab_size=2,
+           title="Correlation among Continuous Predictors",
+           legend.title="correlation") +
+  scale_x_discrete(labels=seq(1:length(cols_continuous))) +
+  scale_y_discrete(labels=seq(1:length(cols_continuous))) +
+  theme(axis.text.x = element_text(angle=0))
+
+col_lookup <- data.frame(seq(1:length(cols_continuous)),cols_continuous )
+```
+
+```{r, fig.height=7, eval=FALSE}
+fetal_health_boxplot <- function(col_name) {
+  x <- unlist(heart[,c(col_name)], use.names = F)
+  data <- data.frame(heart$fetal_health,x)
+  p <- ggplot(data, aes(x=factor(heart.fetal_health), y=x)) +
+    geom_boxplot() + xlab("fetal health") + ylab(col_name)
+    scale_x_discrete(labels=c("normal","suspect",""))
+  p
+}
+
+p<-c()
+p1 <- fetal_health_boxplot(cols_continuous[1])
+p2 <- fetal_health_boxplot(cols_continuous[2])
+p3 <- fetal_health_boxplot(cols_continuous[3])
+p4 <- fetal_health_boxplot(cols_continuous[4])
+p5 <- fetal_health_boxplot(cols_continuous[5])
+p6 <- fetal_health_boxplot(cols_continuous[6])
+p7 <- fetal_health_boxplot(cols_continuous[7])
+p8 <- fetal_health_boxplot(cols_continuous[8])
+p9 <- fetal_health_boxplot(cols_continuous[9])
+p10 <- fetal_health_boxplot(cols_continuous[10])
+p11 <- fetal_health_boxplot(cols_continuous[11])
+p12 <- fetal_health_boxplot(cols_continuous[12])
+p13 <- fetal_health_boxplot(cols_continuous[13])
+p14 <- fetal_health_boxplot(cols_continuous[14])
+p15 <- fetal_health_boxplot(cols_continuous[15])
+p16 <- fetal_health_boxplot(cols_continuous[16])
+p17 <- fetal_health_boxplot(cols_continuous[17])
+
+grid.arrange(p1, p2, p3, p4, p5, p6, p7, p8, p9,
+             p10, p11, p12, p13, p14, p15, p16, p17)
+```
+
+```{r common, warning=FALSE, error=FALSE, message = FALSE, eval=FALSE}
+
+create_upsampled_folds <- function(df, k) {
+  #' Create Newly Upsampled Folds
+  #' 
+  #' Generates new list of folds wherein indices corresponding to minority labels of 3 and 2
+  #' are upsampled 9x and 5x, respectively. 
+  #'
+  #' @param df dataframe. fetal health records should be used here
+  #' @param k integer. number of folds
+  
+  p <- rep((nrow(df)/k)/nrow(df),k)
+  folds <- partition(df$fetal_health, p=p, type=c("basic"), shuffle=TRUE)
+  new_folds <- c()
+  for (fold_i in 1:length(folds)) {
+    upsampled_fold <- c()
+    for (i in folds[[fold_i]]) { # Check label and upsample based on entire data balance
+      label <- unlist(df[i,22],use.names = F)
+      if (label == 3) {
+        upsampled_fold <- append(upsampled_fold, rep(i,9))
+      } else if (label == 2) {
+        upsampled_fold <- append(upsampled_fold, rep(i,5))
+      } else {
+        upsampled_fold <- append(upsampled_fold, i)
+      }
+    }
+    new_folds[[fold_i]] <- upsampled_fold
+  }
+  new_folds
+}
+
+```
+
+```{r, eval=FALSE}
+data = read_csv("../data/fetal_health.csv")
+```
+
+### EDA of discrete variables and response variable
+```{r discrete, warning=FALSE, eval=FALSE}
+
+cols_discrete = c("severe_decelerations","prolongued_decelerations",
+                  "histogram_number_of_zeroes",
+                  "histogram_tendency")
+
+# Histogram for discrete variables
+data %>% dplyr::select(cols_discrete) %>% 
+  tidyr::pivot_longer(cols_discrete) %>% 
+  ggplot(aes(x=value)) +
+  geom_histogram()+
+  scale_y_continuous(trans="log",labels=function(x) sprintf("%.2f", x))+
+  facet_wrap(~name,scale="free")+
+  xlab("Variable")+
+  ylab("log(count)")
+
+# cross tab
+for (i in 1:4){
+  for (j in i:4){
+    if (i!=j){
+      t = table(data[,cols_discrete[i]],
+                           data[,cols_discrete[j]])
+      chisq = chisq.test(t)
+      if (chisq$p.value <=0.05){
+        print(paste0(cols_discrete[i], " and ", cols_discrete[j], " are associated."))
+        print(paste0("With a p-value of: ",round(chisq$p.value,4)))
+      }
+    }
+  }
+}
+```
+
+### EDA of response variable
+```{r, eval=FALSE}
+# frequency table and distribution graphs of the fetal_health
+tab1(data$fetal_health, sort.group = "decreasing", 
+     graph=FALSE, cum.percent = TRUE,
+     bar.values="percent",main = "Distribution of fetal health classes")
+
+# relationship with other categorical variables
+for (c in cols_discrete){
+  print(paste0("--------------- cross table between ",c," and fetal_health ----------------"))
+  print(prop.table(table(data[,c],data[,"fetal_health"])),digits=3)
+}
+```
+
+### Histograms of the Continuous Predictors
+```{r, eval=FALSE}
+df <- read.csv('../data/fetal_health.csv')
+cols_discrete = c("severe_decelerations","prolongued_decelerations",
+                  "histogram_number_of_zeroes",
+                  "histogram_tendency")
+
+df <- df[, -which(names(df) %in% cols_discrete)]
+
+df_transpose <- as.data.frame(t(as.matrix(df)))
+df_transpose <- cbind(rownames(df_transpose), data.frame(df_transpose, row.names=NULL))
+
+library(tidyverse)
+
+df_transpose %>%
+  pivot_longer(cols = -`rownames(df_transpose)`) %>%
+  ggplot(aes(value)) +
+  facet_wrap(~ `rownames(df_transpose)`, scales = "free") +
+  geom_histogram(bins = 30)
+```
+
+### Correlation Matrix
+
+```{r, eval=FALSE}
+test <- cor(df)
+as.data.frame(apply(test, 2, function(x) ifelse (abs(x) >=0.85,x,"NA")))
+```
+
+# Modeling
+
+```{r , eval=FALSE}
+library("readr")
+library("dplyr")
+
+create_upsampled_folds <- function(df, k) {
+  #' Create Newly Upsampled Folds
+  #' 
+  #' Generates new list of folds wherein indices corresponding to minority labels of 3 and 2
+  #' are upsampled 9x and 5x, respectively. 
+  #'
+  #' @param df dataframe. fetal health records should be used here
+  #' @param k integer. number of folds
+  
+  p <- rep((nrow(df)/k)/nrow(df),k)
+  folds <- partition(df$fetal_health, p=p, type=c("basic"), shuffle=TRUE)
+  new_folds <- c()
+  for (fold_i in 1:length(folds)) {
+    upsampled_fold <- c()
+    for (i in folds[[fold_i]]) { # Check label and upsample based on entire data balance
+      label <- unlist(df[i,22],use.names = F)
+      if (label == 3) {
+        upsampled_fold <- append(upsampled_fold, rep(i,9))
+      } else if (label == 2) {
+        upsampled_fold <- append(upsampled_fold, rep(i,5))
+      } else {
+        upsampled_fold <- append(upsampled_fold, i)
+      }
+    }
+    new_folds[[fold_i]] <- upsampled_fold
+  }
+  new_folds
+}
+```
+
+### Multinomial Neural Network Classification
+
+```{r, eval=FALSE}
+heart_std <- heart
+heart_std[1:21] <-  sapply(heart_std[1:21], function(x) (x-mean(x))/sd(x)) #standardize predictors
+heart_std$fetal_health <- factor(heart_std$fetal_health, ordered = FALSE) # set response to factor
+
+set.seed(42)
+##Now use multiple reps of CV to compare Neural Nets and logistic reg models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 5 #number of different models to fit
+n=nrow(heart_std)
+y<-heart_std[[22]]
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.test <- matrix(0,Nrep,n.models)
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(heart_std,K)
+  for (k in 1:K) {
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=2,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],1] <- phat 
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=5,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],2] <- phat
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=7,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],3] <- phat
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=9,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],4] <- phat
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=13,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],5] <- phat
+  
+  } #end of k loop
+  #CV.rate[j,]=apply(yhat,2,function(x) sum(y != x)/n) # mis-class rate
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean)
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+```
+
+A hidden node size of 9 provides an optimal initial balance of recall and precision for class 3 (pathological fetal health) while maintaining adequate F1 scores for classes 1 and 2. The F1 for class 1 is 0.8683865 
+Below, a more narrow tuning will be used for node size and lambda.
+
+```{r, eval=FALSE}
+set.seed(42)
+##Now use multiple reps of CV to compare Neural Nets and logistic reg models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 5 #number of different models to fit
+n=nrow(heart_std)
+y<-heart_std[[22]]
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.test <- matrix(0,Nrep,n.models)
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(heart_std,K)
+  for (k in 1:K) {
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=8,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],1] <- phat 
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=9,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],2] <- phat
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=10,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],3] <- phat
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=11,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],4] <- phat
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=12,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],5] <- phat
+  
+  } #end of k loop
+  #CV.rate[j,]=apply(yhat,2,function(x) sum(y != x)/n) # mis-class rate
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean); CV.F1_class_3Ave
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+```
+
+Node size of 13 provides a class 3 F1 score of 0.8699674. 
+
+```{r, eval=FALSE}
+set.seed(42)
+##Now use multiple reps of CV to compare Neural Nets and logistic reg models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 3 #number of different models to fit
+n=nrow(heart_std)
+y<-heart_std[[22]]
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.test <- matrix(0,Nrep,n.models)
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(heart_std,K)
+  for (k in 1:K) {
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=12,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],1] <- phat 
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=15,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],2] <- phat
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=20,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],3] <- phat
+  
+  } #end of k loop
+  #CV.rate[j,]=apply(yhat,2,function(x) sum(y != x)/n) # mis-class rate
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean); CV.F1_class_3Ave
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+```
+
+Node size of 20 provides a class 3 F1 score of 0.8717784. 
+
+```{r, eval=FALSE}
+set.seed(42)
+##Now use multiple reps of CV to compare Neural Nets and logistic reg models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 1 #number of different models to fit
+n=nrow(heart_std)
+y<-heart_std[[22]]
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.test <- matrix(0,Nrep,n.models)
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(heart_std,K)
+  for (k in 1:K) {
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=30,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],1] <- phat 
+  
+  } #end of k loop
+  #CV.rate[j,]=apply(yhat,2,function(x) sum(y != x)/n) # mis-class rate
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean); CV.F1_class_3Ave
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+```
+
+Node size of 30 and decay of 0.1 provides class 3 F1 score of 0.8803023.
+
+```{r, eval=FALSE}
+set.seed(42)
+##Now use multiple reps of CV to compare Neural Nets and logistic reg models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 3 #number of different models to fit
+n=nrow(heart_std)
+y<-heart_std[[22]]
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.test <- matrix(0,Nrep,n.models)
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(heart_std,K)
+  for (k in 1:K) {
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=10,decay=.05, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],1] <- phat 
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=15,decay=.05, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],2] <- phat 
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=20,decay=.05, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],3] <- phat 
+  
+  } #end of k loop
+  #CV.rate[j,]=apply(yhat,2,function(x) sum(y != x)/n) # mis-class rate
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean); CV.F1_class_3Ave
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+```
+
+
+```{r, eval=FALSE}
+set.seed(42)
+##Now use multiple reps of CV to compare Neural Nets and logistic reg models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 1 #number of different models to fit
+n=nrow(heart_std)
+y<-heart_std[[22]]
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.test <- matrix(0,Nrep,n.models)
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(heart_std,K)
+  for (k in 1:K) {
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=30,decay=.05, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],1] <- phat 
+  
+  } #end of k loop
+  #CV.rate[j,]=apply(yhat,2,function(x) sum(y != x)/n) # mis-class rate
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean); CV.F1_class_3Ave
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+```
+
+
+```{r, eval=FALSE}
+set.seed(42)
+##Now use multiple reps of CV to compare Neural Nets and logistic reg models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 4 #number of different models to fit
+n=nrow(heart_std)
+y<-heart_std[[22]]
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.test <- matrix(0,Nrep,n.models)
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(heart_std,K)
+  for (k in 1:K) {
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=30,decay=.09, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],1] <- phat 
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=30,decay=.1, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],2] <- phat 
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=30,decay=.11, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],3] <- phat 
+    out<-nnet(fetal_health~.,heart_std[-Ind[[k]],],linout=FALSE,skip=FALSE,size=30,decay=.12, maxit=1000,trace=FALSE)
+    phat<-predict(out,heart_std[Ind[[k]],], 'class');  yhat[Ind[[k]],4] <- phat 
+  
+  } #end of k loop
+  #CV.rate[j,]=apply(yhat,2,function(x) sum(y != x)/n) # mis-class rate
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=heart_std$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean); CV.F1_class_3Ave
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+```
+
+Optimal node size is 30 and lambda/decay of 0.11.
+
+
+```{r, eval=FALSE}
+# scale features
+
+data_scale = data %>% 
+  mutate(fetal_health = as.factor(fetal_health)) %>% 
+  mutate_if(is.double,function(x) as.numeric(scale(x)))
+
+```
+
+### SVM
+
+### rbf model
+```{r svm rbf model, eval=FALSE}
+set.seed(42)
+##Now use multiple reps of CV to compare svm models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 25 #number of different models to fit
+n=nrow(data_scale)
+y<-data_scale$fetal_health
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+
+cost = c(0.01,0.1,1,10,100)
+gamma = c(1/50,1/40,1/21,0.3,0.75)
+grid = expand.grid(cost,gamma)
+colnames(grid) = c("cost","gamma")
+
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(data_scale,K)
+  for (k in 1:K) {
+    for (l in 1:n.models){
+      out = svm(fetal_health~.,data=data_scale[-Ind[[k]],],
+                  kernel="radial", cost=grid[l,1], gamma = grid[l,2])
+      yhat[Ind[[k]],l] = predict(out,data_scale[Ind[[k]],],type="class")
+    }
+  } #end of k loop
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+
+```
+
+```{r, eval=FALSE}
+grid %>% mutate(CV.acc = CV.overall_accuracy_Ave,
+                CV.prec_3 = CV.precision_class_3Ave,
+                CV.recall_3 = CV.recall_class_3Ave,
+                CV.F1_class1 = CV.F1_class_1Ave,
+                CV.F1_class2 = CV.F1_class_2Ave,
+                CV.F1_class3 = CV.F1_class_3Ave) %>% 
+  arrange(-CV.F1_class3)
+```
+
+### Linear Model
+
+```{r svm linear model, eval=FALSE}
+set.seed(42)
+##Now use multiple reps of CV to compare svm models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 5 #number of different models to fit
+n=nrow(data_scale)
+y<-data_scale$fetal_health
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+
+cost = c(0.01,0.1,1,10,100)
+grid = expand.grid(cost)
+colnames(grid) = c("cost")
+
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(data_scale,K)
+  for (k in 1:K) {
+    for (l in 1:n.models){
+      out = svm(fetal_health~.,data=data_scale[-Ind[[k]],],
+                  kernel="linear", cost=grid[l,1])
+      yhat[Ind[[k]],l] = predict(out,data_scale[Ind[[k]],],type="class")
+    }
+  } #end of k loop
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+
+```
+
+```{r, eval=FALSE}
+grid %>% mutate(CV.acc = CV.overall_accuracy_Ave,
+                CV.prec_3 = CV.precision_class_3Ave,
+                CV.recall_3 = CV.recall_class_3Ave,
+                CV.F1_class1 = CV.F1_class_1Ave,
+                CV.F1_class2 = CV.F1_class_2Ave,
+                CV.F1_class3 = CV.F1_class_3Ave) %>% 
+  arrange(-CV.F1_class3)
+```
+
+### Random Forest
+
+```{r rf model, eval=FALSE}
+set.seed(42)
+##Now use multiple reps of CV to compare svm models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 15 #number of different models to fit
+n=nrow(data_scale)
+y<-data_scale$fetal_health
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_1 <- matrix(0,Nrep,n.models)
+CV.F1_class_2 <- matrix(0,Nrep,n.models)
+
+mtry = c(2,4,6,9,12)
+nodesize = c(1,3,5)
+grid = expand.grid(mtry,nodesize)
+colnames(grid) = c("mtry","nodesize")
+
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(data_scale,K)
+  #print("Replica = ", j)
+  for (k in 1:K) {
+    for (l in 1:n.models){
+      rf1 = randomForest(fetal_health~.,data_scale[-Ind[[k]],], mtry=grid[j,1],
+                       ntree=500,nodesize=grid[j,2],importance=TRUE)
+      yhat[Ind[[k]],l] = predict(rf1,data_scale[Ind[[k]],],type="class")
+    }
+  } #end of k loop
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[3,"F1"])
+  CV.F1_class_1[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[1,"F1"])
+  CV.F1_class_2[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=data_scale$fetal_health, 
+                                                       as.factor(x))$byClass[2,"F1"])
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean)
+CV.F1_class_1Ave<-apply(CV.F1_class_1,2,mean)
+CV.F1_class_2Ave<-apply(CV.F1_class_2,2,mean)
+
+```
+
+```{r, eval=FALSE}
+####### SHOW MODEL PERFORMANCES
+grid %>% mutate(CV.acc = CV.overall_accuracy_Ave,
+                CV.prec_3 = CV.precision_class_3Ave,
+                CV.recall_3 = CV.recall_class_3Ave,
+                CV.F1_class1 = CV.F1_class_1Ave,
+                CV.F1_class2 = CV.F1_class_2Ave,
+                CV.F1_class3 = CV.F1_class_3Ave) %>% 
+  arrange(-CV.F1_class3)
+```
+
+```{r, eval=FALSE}
+########### RUN THE BEST MODEL 
+rf1 = randomForest(fetal_health~.,data_scale,mtry=6,
+                       ntree=500,nodesize=1,importance=TRUE)
+
+########## FEATURE IMPORTANCE
+as.data.frame(rf1$importance) %>% 
+  arrange(-MeanDecreaseAccuracy)
+
+######### PARTIAL DEPENDENCY PLOTS
+imp <- importance(rf1)
+impvar <- rownames(imp)[order(imp[, 4], decreasing=TRUE)]
+op <- par(mfrow=c(1, 3))
+for (i in 1:3) {
+    partialPlot(rf1, data_scale, impvar[i], xlab=impvar[i],
+                main = c("Patial Dependence on",impvar[i]),
+                which.class = "3")
+}
+par(op)
+```
+
+
+### Data Split
+
+```{r, eval =FALSE}
+library(tidyverse)
+library(dplyr)
+library(caret)
+
+df <- read.csv('fetal_health.csv')
+```
+
+### Step-wise Model using glm (with poisson family and 'log' link)
+
+```{r, eval =FALSE}
+full_mod <- glm(fetal_health ~ ., data=df, family=poisson(link = 'log'))
+backwards <- step(full_mod,trace=0) #would suppress step by step output.
+formula(backwards)
+```
+
+```{r, eval =FALSE}
+#install.packages("roxygen2")
+#install.packages("docstring")
+library(roxygen2)
+library(docstring)
+create_upsampled_folds <- function(df, k) {
+  #' Create Newly Upsampled Folds
+  #' 
+  #' Generates new list of folds wherein indices corresponding to minority labels of 3 and 2
+  #' are upsampled 9x and 5x, respectively. 
+  #'
+  #' @param df dataframe. fetal health records should be used here
+  #' @param k integer. number of folds
+  
+  p <- rep((nrow(df)/k)/nrow(df),k)
+  folds <- partition(df$fetal_health, p=p, type=c("basic"), shuffle=TRUE)
+  new_folds <- c()
+  for (fold_i in 1:length(folds)) {
+    upsampled_fold <- c()
+    for (i in folds[[fold_i]]) { # Check label and upsample based on entire data balance
+      label <- unlist(df[i,22],use.names = F)
+      if (label == 3) {
+        upsampled_fold <- append(upsampled_fold, rep(i,9))
+      } else if (label == 2) {
+        upsampled_fold <- append(upsampled_fold, rep(i,5))
+      } else {
+        upsampled_fold <- append(upsampled_fold, i)
+      }
+    }
+    new_folds[[fold_i]] <- upsampled_fold
+  }
+ new_folds
+}
+```
+
+
+```{r, eval =FALSE}
+set.seed(42)
+library(splitTools)
+##Now use multiple reps of CV to compare Neural Nets and logistic reg models###
+Nrep<-5 #number of replicates of CV
+K<-10  #K-fold CV on each replicate
+n.models = 1 #number of different models to fit
+n=nrow(df)
+y<-df$fetal_health
+yhat=matrix(0,n,n.models)
+CV.overall_accuracy <- matrix(0,Nrep,n.models)
+CV.precision_class_3 <- matrix(0,Nrep,n.models)
+CV.recall_class_3 <- matrix(0,Nrep,n.models)
+CV.F1_class_3 <- matrix(0,Nrep,n.models)
+CV.test <- matrix(0,Nrep,n.models)
+for (j in 1:Nrep) {
+  Ind<-create_upsampled_folds(df,K)
+  for (k in 1:K) {
+    out = glm(formula(backwards), data=df[-Ind[[k]],], family=poisson(link = 'log'))
+    Y.prob.1 <- predict(out, newdata=df[Ind[[k]],],response)
+    lambdas <- Y.prob.1
+    
+    probs_1 <- (lambdas^1)*exp(-1*lambdas)/factorial(1)
+    probs_2 <- (lambdas^2)*exp(-1*lambdas)/factorial(2)
+    probs_3 <- (lambdas^3)*exp(-1*lambdas)/factorial(3)
+    
+    prob_matrix <- cbind(probs_1, probs_2, probs_3)
+    
+    n <- nrow(df[Ind[[k]],])
+    Y.hat.1 = rep(0,n);
+    
+    for (i in 1:nrow(prob_matrix)){
+      Y.hat.1[i] <- which.max(prob_matrix[i,])
+    }
+      
+    yhat[Ind[[k]],1] <- Y.hat.1
+  
+  }
+  
+  CV.overall_accuracy[j,] = apply(yhat,2,
+                      function(x) confusionMatrix(reference=as.factor(df$fetal_health),
+                                                  as.factor(x))$overall["Accuracy"])
+  CV.precision_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=as.factor(df$fetal_health),
+                                                       as.factor(x))$byClass[3,"Precision"])
+  CV.recall_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=as.factor(df$fetal_health),
+                                                       as.factor(x))$byClass[3,"Recall"])
+  CV.F1_class_3[j,] = apply(yhat,2,
+                           function(x) confusionMatrix(reference=as.factor(df$fetal_health),
+                                                       as.factor(x))$byClass[3,"F1"])
+} #end of j loop
+CV.overall_accuracy_Ave<- apply(CV.overall_accuracy,2,mean) #averaged CV misclass rate
+CV.precision_class_3Ave<-apply(CV.precision_class_3,2,mean)
+CV.recall_class_3Ave<-apply(CV.recall_class_3,2,mean)
+CV.F1_class_3Ave<-apply(CV.F1_class_3,2,mean)
+
+CV.overall_accuracy_Ave
+CV.precision_class_3Ave
+CV.recall_class_3Ave
+CV.F1_class_3Ave
+```
+
+```{r, eval =FALSE}
+table(yhat, df$fetal_health)
+summary(out)
+```
